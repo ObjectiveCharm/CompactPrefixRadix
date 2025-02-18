@@ -1,0 +1,11 @@
+[package]
+name = "CompactPrefixRadix"
+version = "0.1.0"
+edition = "2021"
+authors = ["ObjectiveCharm"]
+description = "a minimalistic but efficient radix tree implementation with extra prefix support"
+license = "MIT"
+repository = "https://github.com/ObjectiveCharm/"
+
+
+[dependencies]

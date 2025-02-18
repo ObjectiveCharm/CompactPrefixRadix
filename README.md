@@ -28,8 +28,9 @@ It provides a KV store like generic interface, with some extended feature in pre
 # Notice
 - The storage is designed for light-wight CoW value which can be cloned cheaply.
 - If you want to store heavy value, you should use `Arc` or `Rc` to wrap it, or struggle with the borrow checker and lifetime.
-- It is compatible with ascii characters, it is trade-off, add support to complete unicode characters will introduce overhead, and the performance of bitmap will drastically decrease.
+- It is compatible with ascii characters, it is trade-off, add support to complete Unicode characters will introduce overhead, and the performance of bitmap will drastically decrease.
   But in order to support Unicode characters, you can convert it to binary blob and specify a large enough path length, and it will work.
+- It uses u64 size, in 32 bit build, software emulation will be used, and that will result in a performance penalty.
 
 
 # Efficiency
