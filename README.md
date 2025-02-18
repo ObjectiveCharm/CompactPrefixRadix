@@ -1,6 +1,7 @@
 # Introduction
 A very compact implementation of Radix tree in Rust with extended feature in prefix match.
 It is originally designed for a network project, but I think it is a good idea to extract it as a standalone library.
+No third party dependency is used, and it is pure Rust code.
 I forced AI to write the code.
 
 # Usage
