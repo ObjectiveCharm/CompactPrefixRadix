@@ -9,7 +9,6 @@ pub const IPV6_PATH_LEN: usize = 128;
 #[inline]
 pub fn char_to_index(c: char) -> Option<usize> {
     match c {
-        // 保持原有映射关系不变
         'a'..='z' => Some((c as usize) - ('a' as usize)),
         'A'..='Z' => Some(26 + (c as usize) - ('A' as usize)),
         '.' => Some(52),
@@ -17,7 +16,6 @@ pub fn char_to_index(c: char) -> Option<usize> {
         '-' => Some(54),
         '/' => Some(55),
 
-        // 增加更多URL合法字符的映射
         '0'..='9' => Some(56 + (c as usize) - ('0' as usize)), // 56-65
         ':' => Some(66),
         '?' => Some(67),
