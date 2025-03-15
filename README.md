@@ -3,6 +3,7 @@ A very compact implementation of Radix tree in Rust with extended feature in pre
 It is originally designed for a network project, but I think it is a good idea to extract it as a standalone library.
 No third party dependency is used, and it is pure Rust code.
 I forced AI to help me to write the code.
+__!!!If you are using v0.1.0, please update, the old version have a memory leak problem because of my carelessness (I forgot to remove extraneous unused Box::leak() product!!!__
 
 # Usag
 creation, deletion and manipulate
