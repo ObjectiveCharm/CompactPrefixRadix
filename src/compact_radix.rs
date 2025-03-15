@@ -180,10 +180,9 @@ impl<V, const N: usize> Node<V, N> {
 
 }
 
-impl<V: Clone, const N: usize> RadixTree<V, N> {
+impl<V, const N: usize> RadixTree<V, N> {
     /// Creation
     pub fn new() -> Self {
-        let root: &mut Box<Node<V, N>> = Box::leak(Box::new(Node::new()));
         RadixTree {
             root: NonNull::new(Box::into_raw(Node::new())).unwrap(),
             len: 0,
@@ -222,6 +221,34 @@ impl<V: Clone, const N: usize> RadixTree<V, N> {
         }
     }
 
+    /// Number of elements
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    /// Whether the structure is empty
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// Clean / drain the structure
+    pub fn clear(&mut self) {
+        unsafe {
+            drop(Box::from_raw(self.root.as_ptr()));
+            self.root = NonNull::new(Box::into_raw(Node::new())).unwrap();
+            self.len = 0;
+        }
+    }
+}
+impl<V: Clone, const N: usize> RadixTree<V, N> {
+    /// Exact match
+    pub fn exact_match(&self, input: &str) -> Option<V> {
+        unsafe {
+            self.find_first_match(input, true)
+                .and_then(|(node, _)| (*node).value.as_ref().cloned())
+        }
+    }
+
     /// Retrieve the value associated with the input key's pattern, which is stored in the structure.
     /// That means the pattern (as the key) is the shortest prefix of the input
     /// This operation will stop as soon as the first match (but could be not the longest) is found
@@ -229,10 +256,8 @@ impl<V: Clone, const N: usize> RadixTree<V, N> {
     /// For example I think "test" is not a prefix match of "test", but "test1" is
     pub fn first_prefix_match(&self, input: &str) -> Option<(V, usize)> {
         unsafe {
-            unsafe {
-                self.find_first_match(input, false)
-                    .map(|(node, len)| ((*node).value.as_ref().unwrap().clone(), len))
-            }
+            self.find_first_match(input, false)
+                .map(|(node, len)| ((*node).value.as_ref().unwrap().clone(), len))
         }
     }
 
@@ -261,38 +286,139 @@ impl<V: Clone, const N: usize> RadixTree<V, N> {
             self.all_prefix_matches(input).into_iter().last()
         }
     }
+}
 
-    /// Exact match
-    pub fn exact_match(&self, input: &str) -> Option<V> {
+// Get by immutable/mutable reference
+// It works for value type that doesn't implement Clone
+impl<V, const N: usize> RadixTree<V, N> {
+    /// Retrieve a reference to the value associated with the input key's pattern.
+    /// Returns the shortest prefix match along with its length, if found.
+    /// **Notice: exact matched input won't be considered as a prefix match**
+    pub fn first_prefix_match_ref<'a>(&'a self, input: &str) -> Option<(&'a V, usize)> {
+        unsafe {
+            self.find_first_match(input, false)
+                .map(|(node, len)| ((*node).value.as_ref().unwrap(), len))
+        }
+    }
+
+    /// Retrieve a mutable reference to the value associated with the input key's pattern.
+    /// Returns the shortest prefix match along with its length, if found.
+    /// **Notice: exact matched input won't be considered as a prefix match**
+    pub fn first_prefix_match_mut<'a>(&'a mut self, input: &str) -> Option<(&'a mut V, usize)> {
+        unsafe {
+            // We need to convert the const pointer to mut
+            if let Some((node, len)) = self.find_first_match(input, false) {
+                let node_mut = node as *mut Node<V, N>;
+                Some(((*node_mut).value.as_mut().unwrap(), len))
+            } else {
+                None
+            }
+        }
+    }
+
+    /// Retrieve all references to values associated with the input key's patterns,
+    /// in ascending order of length.
+    pub fn all_prefix_matches_ref<'a>(&'a self, input: &str) -> Vec<(&'a V, usize)> {
+        unsafe {
+            if let Some((first_node, first_len)) = self.find_first_match(input, false) {
+                self.find_all_matches_from(first_node, first_len, input)
+            } else {
+                Vec::new()
+            }
+        }
+    }
+
+    /// Retrieve all mutable references to values associated with the input key's patterns,
+    /// in ascending order of length.
+    pub fn all_prefix_matches_mut<'a>(&'a mut self, input: &str) -> Vec<(&'a mut V, usize)> {
+        unsafe {
+            if let Some((first_node, first_len)) = self.find_first_match(input, false) {
+                // First collect the node pointers and match lengths
+                let matches = self.collect_match_nodes(first_node, first_len, input);
+
+                // Then convert them to mutable references
+                matches.into_iter()
+                    .map(|(node_ptr, len)| {
+                        let node_mut = node_ptr as *mut Node<V, N>;
+                        ((*node_mut).value.as_mut().unwrap(), len)
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            }
+        }
+    }
+
+    /// Retrieve a reference to the value associated with the longest prefix match for the input key.
+    pub fn longest_prefix_match_ref<'a>(&'a self, input: &str) -> Option<(&'a V, usize)> {
+        self.all_prefix_matches_ref(input).into_iter().last()
+    }
+
+    /// Retrieve a mutable reference to the value associated with the longest prefix match for the input key.
+    pub fn longest_prefix_match_mut<'a>(&'a mut self, input: &str) -> Option<(&'a mut V, usize)> {
+        self.all_prefix_matches_mut(input).into_iter().last()
+    }
+
+    /// Retrieve a reference to the exact match value for the input key, if it exists.
+    pub fn exact_match_ref<'a>(&'a self, input: &str) -> Option<&'a V> {
         unsafe {
             self.find_first_match(input, true)
-                .and_then(|(node, _)| (*node).value.as_ref().cloned())
+                .and_then(|(node, _)| (*node).value.as_ref())
         }
     }
 
-    /// Number of elements
-    pub fn len(&self) -> usize {
-        self.len
-    }
-
-    /// Whether the structure is empty
-    pub fn is_empty(&self) -> bool {
-        self.len == 0
-    }
-
-    /// Clean / drain the structure
-    pub fn clean(&mut self) {
+    /// Retrieve a mutable reference to the exact match value for the input key, if it exists.
+    pub fn exact_match_mut<'a>(&'a mut self, input: &str) -> Option<&'a mut V> {
         unsafe {
-            drop(Box::from_raw(self.root.as_ptr()));
-            self.root = NonNull::new(Box::into_raw(Node::new())).unwrap();
-            self.len = 0;
+            // Convert the result to a mutable pointer since we have &mut self
+            if let Some((node, _)) = self.find_first_match(input, true) {
+                let node_mut = node as *mut Node<V, N>;
+                (*node_mut).value.as_mut()
+            } else {
+                None
+            }
         }
+    }
+
+    // Helper method to collect nodes and match lengths
+    unsafe fn collect_match_nodes(&self, mut current: *const Node<V, N>, mut matched_len: usize, key: &str) -> Vec<(*const Node<V, N>, usize)> {
+        let mut matches = vec![(current, matched_len)];
+
+        while !current.is_null() {
+            let node = &*current;
+            let remaining = &key[matched_len..];
+
+            // If input is fully consumed, discard the last match and exit
+            if remaining.is_empty() {
+                matches.pop();  // Remove the last match (it's an exact match)
+                break;
+            }
+
+            if let Some(idx) = char_to_index(remaining.chars().next().unwrap()) {
+                if node.has_child(idx) {
+                    current = node.children[idx].unwrap().as_ptr();
+                    let edge_str = (*current).edge_str();
+
+                    if let Some(remaining_after_edge) = remaining.strip_prefix(edge_str.as_str()) {
+                        matched_len += edge_str.len();
+                        if (*current).value.is_some() {
+                            // Only add match if there are remaining characters
+                            if !remaining_after_edge.is_empty() {
+                                matches.push((current, matched_len));
+                            }
+                        }
+                        continue;
+                    }
+                }
+            }
+            break;
+        }
+        matches
     }
 }
 
-
 impl<V, const N: usize> RadixTree<V, N> {
-    pub unsafe fn find_first_match(&self, key: &str, exact: bool) -> Option<(*const Node<V, N>, usize)> {
+    unsafe fn find_first_match(&self, key: &str, exact: bool) -> Option<(*const Node<V, N>, usize)> {
         // 1. 先处理空字符串的特殊情况
         if key.is_empty() {
             let root = self.root.as_ptr();
@@ -345,7 +471,7 @@ impl<V, const N: usize> RadixTree<V, N> {
         None
     }
 
-    pub unsafe fn find_all_matches_from(&self, mut current: *const Node<V, N>, mut matched_len: usize, key: &str) -> Vec<(&V, usize)> {
+    unsafe fn find_all_matches_from(&self, mut current: *const Node<V, N>, mut matched_len: usize, key: &str) -> Vec<(&V, usize)> {
         let mut matches = vec![((*current).value.as_ref().unwrap(), matched_len)];
 
         while !current.is_null() {
@@ -509,7 +635,7 @@ impl<V, const N: usize> RadixTree<V, N> {
 
         old_value
     }
-    /// 合并两个节点，消费child节点，更新parent节点
+
     unsafe fn merge_nodes(
         &mut self,
         parent: *mut Node<V, N>,
@@ -623,7 +749,6 @@ impl<V, const N: usize> Drop for Node<V, N> {
             return;
         }
 
-        // 其余逻辑不变
         for i in 0..CHAR_SET_SIZE {
             if self.has_child(i) {
                 if let Some(child) = self.children[i].take() {
@@ -948,7 +1073,7 @@ mod tests {
         assert!(tree.len() > 0);
 
         // 10. 清空树
-        tree.clean();
+        tree.clear();
         assert_eq!(tree.len(), 0);
         assert_eq!(tree.exact_match("abc"), None);
     }
@@ -1036,5 +1161,129 @@ mod tests {
 
         assert_eq!(tree.exact_match("abc"), Some(1));
         assert_eq!(tree.exact_match("abcd"), Some(2));
+    }
+
+    #[test]
+    fn test_reference_prefix_matches() {
+        let mut tree = RadixTree::<String, 64>::new();
+        tree.insert("test", String::from("test_val"));
+        tree.insert("testing", String::from("testing_val"));
+        tree.insert("tent", String::from("tent_val"));
+
+        // Test immutable reference matches
+        if let Some((val_ref, len)) = tree.first_prefix_match_ref("testing123") {
+            assert_eq!(val_ref, "test_val");
+            assert_eq!(len, 4);
+        } else {
+            panic!("Expected to find a match");
+        }
+
+        let all_refs = tree.all_prefix_matches_ref("testing123");
+        assert_eq!(all_refs.len(), 2);
+        assert_eq!(all_refs[0].0, "test_val");
+        assert_eq!(all_refs[0].1, 4);
+        assert_eq!(all_refs[1].0, "testing_val");
+        assert_eq!(all_refs[1].1, 7);
+
+        if let Some((val_ref, len)) = tree.longest_prefix_match_ref("testing123") {
+            assert_eq!(val_ref, "testing_val");
+            assert_eq!(len, 7);
+        } else {
+            panic!("Expected to find a match");
+        }
+
+        // Test exact match reference
+        assert_eq!(tree.exact_match_ref("test").unwrap(), "test_val");
+        assert_eq!(tree.exact_match_ref("missing"), None);
+
+        // Test mutable reference matches
+        if let Some((val_ref, len)) = tree.first_prefix_match_mut("testing123") {
+            assert_eq!(*val_ref, "test_val");
+            *val_ref = String::from("modified_test_val");
+            assert_eq!(len, 4);
+        }
+
+        // Check if modification was successful
+        assert_eq!(tree.exact_match_ref("test").unwrap(), "modified_test_val");
+
+        // Test all mutable references
+        {
+            let mut all_mut_refs = tree.all_prefix_matches_mut("testing123");
+            assert_eq!(all_mut_refs.len(), 2);
+
+            // Modify values via mutable references
+            *all_mut_refs[0].0 = String::from("modified_again_test_val");
+            *all_mut_refs[1].0 = String::from("modified_testing_val");
+        }
+
+        // Verify modifications
+        assert_eq!(tree.exact_match_ref("test").unwrap(), "modified_again_test_val");
+        assert_eq!(tree.exact_match_ref("testing").unwrap(), "modified_testing_val");
+
+        // Test longest mutable reference
+        if let Some((val_ref, _)) = tree.longest_prefix_match_mut("testing123") {
+            *val_ref = String::from("final_testing_val");
+        }
+
+        // Verify final modification
+        assert_eq!(tree.exact_match_ref("testing").unwrap(), "final_testing_val");
+    }
+
+    #[test]
+    fn test_reference_matches_with_types_without_clone() {
+        // Define a type that doesn't implement Clone
+        struct NoClone {
+            value: i32,
+        }
+
+        let mut tree = RadixTree::<NoClone, 64>::new();
+        tree.insert("one", NoClone { value: 1 });
+        tree.insert("two", NoClone { value: 2 });
+        tree.insert("three", NoClone { value: 3 });
+
+        // Test immutable reference methods
+        if let Some((val_ref, _)) = tree.first_prefix_match_ref("one_more") {
+            assert_eq!(val_ref.value, 1);
+        } else {
+            panic!("Expected to find a match");
+        }
+
+        let refs = tree.all_prefix_matches_ref("one_more");
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].0.value, 1);
+
+        // Test mutable reference methods
+        if let Some((val_ref, _)) = tree.first_prefix_match_mut("two_more") {
+            val_ref.value = 22;
+        }
+
+        // Verify modification
+        assert_eq!(tree.exact_match_ref("two").unwrap().value, 22);
+
+        // Test with multiple prefix matches
+        let mut nested_tree = RadixTree::<NoClone, 64>::new();
+        nested_tree.insert("a", NoClone { value: 1 });
+        nested_tree.insert("ab", NoClone { value: 2 });
+        nested_tree.insert("abc", NoClone { value: 3 });
+        nested_tree.insert("abce", NoClone { value: 4 });
+
+        let all_refs = nested_tree.all_prefix_matches_ref("abcd");
+        assert_eq!(all_refs.len(), 3);
+        assert_eq!(all_refs[0].0.value, 1);
+        assert_eq!(all_refs[1].0.value, 2);
+        assert_eq!(all_refs[2].0.value, 3);
+
+        // Modify all values
+        {
+            let mut all_mut_refs = nested_tree.all_prefix_matches_mut("abcd");
+            for (i, (val_ref, _)) in all_mut_refs.iter_mut().enumerate() {
+                val_ref.value = (i as i32 + 1) * 10;
+            }
+        }
+
+        // Verify modifications
+        assert_eq!(nested_tree.exact_match_ref("a").unwrap().value, 10);
+        assert_eq!(nested_tree.exact_match_ref("ab").unwrap().value, 20);
+        assert_eq!(nested_tree.exact_match_ref("abc").unwrap().value, 30);
     }
 }
