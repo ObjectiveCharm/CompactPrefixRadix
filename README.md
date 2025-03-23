@@ -34,7 +34,7 @@ For queries of Clone types, a CoW style is preferred, and you can use the follow
 For non Clone types, we offer interface to get the value by reference, both mutable and immutable.
 But in concurrent scenarios, to avoid complex borrow checker and lifetime struggling, mechanism such as `Arc` and `Mutex` may be better
 ```rust
-    /// Retrieve a reference to the value associated with the input key's pattern.
+/// Retrieve a reference to the value associated with the input key's pattern.
 /// Returns the shortest prefix match along with its length, if found.
 /// **Notice: exact matched input won't be considered as a prefix match**
 pub fn first_prefix_match_ref<'a>(&'a self, input: &str) -> Option<(&'a V, usize)> {...}
@@ -62,6 +62,12 @@ pub fn exact_match_ref<'a>(&'a self, input: &str) -> Option<&'a V> {...}
 
 /// Retrieve a mutable reference to the exact match value for the input key, if it exists.
 pub fn exact_match_mut<'a>(&'a mut self, input: &str) -> Option<&'a mut V> {...}
+
+/// Enumerate all entries in the RadixTree, returning (key, reference to value)
+pub fn entries(&self) -> Vec<(String, &V)> {...}
+
+/// Clean / drain the structure and dump all entries
+pub fn clear_and_dump(&mut self) -> Vec<(String, V)> {...}
 ```
 
 

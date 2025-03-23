@@ -282,9 +282,7 @@ impl<V: Clone, const N: usize> RadixTree<V, N> {
     /// This operation will continue searching after the first match until the end of the input string
     // It reused the logic of all_prefix_matches
     pub fn longest_prefix_match(&self, input: &str) -> Option<(V, usize)> {
-        unsafe {
-            self.all_prefix_matches(input).into_iter().last()
-        }
+        self.all_prefix_matches(input).into_iter().last()
     }
 }
 
@@ -418,15 +416,72 @@ impl<V, const N: usize> RadixTree<V, N> {
 }
 
 impl<V, const N: usize> RadixTree<V, N> {
+    /// Collect all entries and return a vector of raw pointers to nodes
+    unsafe fn collect_entries_raw(&self, node: *const Node<V, N>, prefix: String) -> Vec<(*mut Node<V, N>, String)> {
+        let mut result = Vec::new();
+        self.collect_entries_recursive(node as *mut Node<V, N>, prefix, &mut result);
+        result
+    }
+
+    unsafe fn collect_entries_recursive(
+        &self,
+        node: *mut Node<V, N>,
+        prefix: String,
+        result: &mut Vec<(*mut Node<V, N>, String)>,
+    ) {
+        let node_ref = &mut *node;
+        let current_prefix = prefix + &node_ref.edge_str();
+
+        // 添加当前节点到结果中
+        result.push((node, current_prefix.clone()));
+
+        // 递归处理所有子节点
+        for i in 0..CHAR_SET_SIZE {
+            if node_ref.has_child(i) {
+                if let Some(child) = node_ref.children[i] {
+                    self.collect_entries_recursive(child.as_ptr(), current_prefix.clone(), result);
+                }
+            }
+        }
+    }
+
+    /// Enumerate all entries in the RadixTree, returning (key, reference to value)
+    pub fn entries(&self) -> Vec<(String, &V)> {
+        let mut result = Vec::new();
+        unsafe {
+            let raw_entries = self.collect_entries_raw(self.root.as_ptr(), String::new());
+            for (node, key) in raw_entries {
+                if let Some(ref value) = (*node).value {
+                    result.push((key, value));
+                }
+            }
+        }
+        result
+    }
+
+    /// Clean / drain the structure and dump all entries
+    pub fn clear_and_dump(&mut self) -> Vec<(String, V)> {
+        let mut entries = Vec::new();
+        unsafe {
+            let raw_entries = self.collect_entries_raw(self.root.as_ptr(), String::new());
+            for (node, key) in raw_entries {
+                if let Some(value) = (*node).value.take() {
+                    entries.push((key, value));
+                }
+            }
+        }
+        self.clear();
+        entries
+    }
+}
+
+impl<V, const N: usize> RadixTree<V, N> {
     unsafe fn find_first_match(&self, key: &str, exact: bool) -> Option<(*const Node<V, N>, usize)> {
-        // 1. 先处理空字符串的特殊情况
         if key.is_empty() {
             let root = self.root.as_ptr();
-            // 如果是精确匹配且根节点有值,则返回根节点
             if exact && (*root).value.is_some() {
                 return Some((root, 0));
             }
-            // 如果是前缀匹配,空字符串不应该返回任何匹配
             return None;
         }
         let mut current = self.root.as_ptr();
@@ -434,7 +489,6 @@ impl<V, const N: usize> RadixTree<V, N> {
         let mut remaining = key;
 
         while !remaining.is_empty() {
-            // 1. 取首字符并找对应子节点
             let first_char = remaining.chars().next().unwrap();
             let idx = char_to_index(first_char)?;
             if !(*current).has_child(idx) {
@@ -1286,4 +1340,36 @@ mod tests {
         assert_eq!(nested_tree.exact_match_ref("ab").unwrap().value, 20);
         assert_eq!(nested_tree.exact_match_ref("abc").unwrap().value, 30);
     }
+
+
+    #[test]
+    fn test_entries() {
+        let mut tree = RadixTree::<String, 64>::new();
+        tree.insert("test", String::from("test_val"));
+        tree.insert("testing", String::from("testing_val"));
+        tree.insert("tent", String::from("tent_val"));
+
+        let entries = tree.entries();
+        assert_eq!(entries.len(), 3);
+        assert!(entries.contains(&("test".to_string(), &"test_val".to_string())));
+        assert!(entries.contains(&("testing".to_string(), &"testing_val".to_string())));
+        assert!(entries.contains(&("tent".to_string(), &"tent_val".to_string())));
+    }
+
+    #[test]
+    fn test_clear_with_dump() {
+        let mut tree = RadixTree::<String, 64>::new();
+        tree.insert("test", String::from("test_val"));
+        tree.insert("testing", String::from("testing_val"));
+        tree.insert("tent", String::from("tent_val"));
+
+        let dumped_entries = tree.clear_and_dump();
+        assert_eq!(dumped_entries.len(), 3);
+        assert!(dumped_entries.contains(&("test".to_string(), "test_val".to_string())));
+        assert!(dumped_entries.contains(&("testing".to_string(), "testing_val".to_string())));
+        assert!(dumped_entries.contains(&("tent".to_string(), "tent_val".to_string())));
+
+        assert!(tree.is_empty());
+    }
+
 }
